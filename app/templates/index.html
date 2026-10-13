@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pokédex - Práctica Docker</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 25px; background-color: #f1f4f8; }
+        .header { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 25px; }
+        .header h1 { margin: 0 0 10px 0; color: #1a202c; }
+        .status-row { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 15px; }
+        .badge { padding: 4px 10px; border-radius: 6px; font-weight: bold; font-size: 0.9em; }
+        .badge-ok { background: #d1fae5; color: #065f46; }
+        .badge-off { background: #e5e7eb; color: #374151; }
+        .badge-err { background: #fee2e2; color: #991b1b; }
+        .perf-box { margin-top: 15px; padding: 10px; background: #eef2ff; border-left: 4px solid #6366f1; border-radius: 4px; font-size: 0.95em; }
+
+        /* Grid de Cartas */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px; }
+        .card { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); text-align: center; border: 1px solid #e2e8f0; transition: transform 0.15s ease; }
+        .card:hover { transform: translateY(-4px); }
+        .card img { width: 130px; height: 130px; object-fit: contain; }
+        .card h3 { margin: 10px 0 5px 0; font-size: 1.15em; color: #2d3748; }
+        .card .tipo { font-size: 0.85em; color: #718096; margin-bottom: 10px; font-weight: 500; }
+        .stats { display: flex; justify-content: space-around; background: #f8fafc; padding: 6px; border-radius: 6px; font-size: 0.85em; font-weight: bold; color: #475569; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Pokédex Containerizada</h1>
+        <div><strong>Entorno:</strong> <code>{{ entorno }}</code></div>
+        <div class="status-row">
+            <div>PostgreSQL: <span class="badge {{ 'badge-ok' if 'ONLINE' in db_status else 'badge-err' }}">{{ db_status }}</span></div>
+            <div>Redis (Caché): <span class="badge {{ 'badge-ok' if 'ONLINE' in redis_status else ('badge-off' if 'DESACTIVADO' in redis_status else 'badge-err') }}">{{ redis_status }}</span></div>
+            <div>Endpoint JSON: <a href="/status"><code>/status</code></a></div>
+        </div>
+        <div class="perf-box">
+            <strong>Origen de datos:</strong> {{ fuente_datos }} | 
+            <strong>Tiempo de respuesta:</strong> <code>{{ tiempo_ms }} ms</code>
+            {% if entorno == 'Producción (PROD)' %}
+                | <strong>Estado de Caché:</strong> <code>{{ cache_badge }}</code>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="grid">
+        {% for poke in pokemon_list %}
+            <div class="card">
+                <small style="color: #a0aec0;">#{{ "%03d"|format(poke.numero) }}</small>
+                <img src="{{ poke.imagen_url }}" alt="{{ poke.nombre }}">
+                <h3>{{ poke.nombre }}</h3>
+                <div class="tipo">{{ poke.tipo }}</div>
+                <div class="stats">
+                    <span>HP: {{ poke.hp }}</span>
+                    <span>ATK: {{ poke.ataque }}</span>
+                </div>
+            </div>
+        {% else %}
+            <p>No se pudieron cargar los Pokémon. Revisa el estado de PostgreSQL.</p>
+        {% endfor %}
+    </div>
+</body>
+</html>
