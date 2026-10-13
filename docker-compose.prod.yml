@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Servicio 1: Base de datos PostgreSQL
+  db:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - prod_db_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - internal_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Servicio 2: Servidor de Caché Redis (solo en PROD)
+  redis:
+    image: redis:7-alpine
+    restart: always
+    networks:
+      - internal_network
+    # Comprobación nativa de salud para Redis
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Servicio 3: Aplicación Flask
+  web:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    restart: always
+    environment:
+      DB_HOST: db
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PORT: ${DB_PORT}
+      # Activamos Redis inyectando su nombre de host en la red
+      REDIS_HOST: redis
+      REDIS_PORT: ${REDIS_PORT}
+    ports:
+      - "${WEB_PORT}:5000"
+    networks:
+      - internal_network
+    # La web solo arranca cuando Postgres Y Redis están 100% listos
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/status')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+# Red interna privada
+networks:
+  internal_network:
+    driver: bridge
+
+# Volumen exclusivo de producción
+volumes:
+  prod_db_data:
