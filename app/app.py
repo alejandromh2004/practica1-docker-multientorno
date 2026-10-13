@@ -1,14 +1,14 @@
 import json
 import os
 import time
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, redirect, render_template, request, url_for
 import psycopg2
 import psycopg2.extras
 import redis
 
 app = Flask(__name__)
 
-# Configuración por variables de entorno (requisito de seguridad)
+# Configuración por variables de entorno
 DB_HOST = os.getenv("DB_HOST", "db")
 DB_NAME = os.getenv("DB_NAME", "practica_db")
 DB_USER = os.getenv("DB_USER", "postgres")
@@ -31,10 +31,11 @@ def get_db_connection():
 
 
 def fetch_pokemon_from_db():
-    """Consulta la lista de Pokémon directamente a PostgreSQL."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("SELECT numero, nombre, tipo, hp, ataque, imagen_url FROM pokemon ORDER BY numero ASC;")
+    cur.execute(
+        "SELECT id, numero, nombre, tipo, hp, ataque, imagen_url FROM pokemon ORDER BY id ASC;"
+    )
     rows = cur.fetchall()
     cur.close()
     conn.close()
@@ -48,13 +49,10 @@ def index():
     redis_status = "DESACTIVADO (DEV)"
     pokemon_list = []
     fuente_datos = "PostgreSQL"
-    tiempo_ms = 0.0
     cache_badge = "MISS"
 
-    # Medimos el tiempo que toma obtener los datos
     inicio = time.perf_counter()
 
-    # 1. Intentamos consultar Redis si está disponible (solo en PROD)
     if REDIS_HOST:
         try:
             r = redis.Redis(
@@ -66,17 +64,15 @@ def index():
             r.ping()
             redis_status = "ONLINE"
 
-            # Buscamos si la colección de cartas ya está en memoria
             datos_cache = r.get("cartas_pokemon")
             if datos_cache:
                 pokemon_list = json.loads(datos_cache)
                 fuente_datos = "Caché Redis (Memoria RAM ⚡)"
                 cache_badge = "HIT"
             else:
-                # Si no está en caché, leemos de PostgreSQL y lo guardamos por 30 segundos
                 pokemon_list = fetch_pokemon_from_db()
                 r.setex("cartas_pokemon", 30, json.dumps(pokemon_list))
-                fuente_datos = "PostgreSQL (Guardado en Redis para próximas consultas)"
+                fuente_datos = "PostgreSQL (Guardado en Redis por 30s)"
                 cache_badge = "MISS"
         except Exception as e:
             redis_status = f"OFFLINE ({str(e)})"
@@ -85,7 +81,6 @@ def index():
             except Exception as dbe:
                 db_status = f"OFFLINE ({str(dbe)})"
     else:
-        # En DEV: siempre directo a PostgreSQL
         try:
             pokemon_list = fetch_pokemon_from_db()
             fuente_datos = "PostgreSQL (Directo de BD)"
@@ -107,10 +102,48 @@ def index():
     )
 
 
+@app.route("/agregar", methods=["POST"])
+def agregar_pokemon():
+    """Inserta un nuevo Pokémon y limpia la caché para reflejar el cambio inmediato."""
+    numero = request.form.get("numero", type=int)
+    nombre = request.form.get("nombre", type=str)
+    tipo = request.form.get("tipo", type=str)
+    hp = request.form.get("hp", type=int)
+    ataque = request.form.get("ataque", type=int)
+    imagen_url = request.form.get("imagen_url", type=str)
+
+    # Imagen por defecto si no se introduce ninguna
+    if not imagen_url:
+        imagen_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/{numero}.png"
+
+    # 1. Guardar en PostgreSQL
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        """
+        INSERT INTO pokemon (numero, nombre, tipo, hp, ataque, imagen_url)
+        VALUES (%s, %s, %s, %s, %s, %s);
+    """,
+        (numero, nombre, tipo, hp, ataque, imagen_url),
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    # 2. Invalidación de caché en Redis (si estamos en producción)
+    if REDIS_HOST:
+        try:
+            r = redis.Redis(host=REDIS_HOST, port=int(REDIS_PORT))
+            r.delete("cartas_pokemon")
+        except Exception:
+            pass
+
+    return redirect(url_for("index"))
+
+
 @app.route("/status")
 @app.route("/health")
 def status():
-    """Endpoint técnico exigido por la práctica."""
     db_ok = False
     try:
         conn = get_db_connection()

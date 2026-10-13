@@ -15,6 +15,13 @@
         .badge-err { background: #fee2e2; color: #991b1b; }
         .perf-box { margin-top: 15px; padding: 10px; background: #eef2ff; border-left: 4px solid #6366f1; border-radius: 4px; font-size: 0.95em; }
 
+        /* Formulario CRUD */
+        .form-container { background: white; padding: 20px; border-radius: 12px; box-shadow: 0 2px 6px rgba(0,0,0,0.06); margin-bottom: 25px; }
+        .form-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 10px; }
+        .form-row input { padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 0.9em; flex: 1; min-width: 120px; }
+        .btn-submit { background: #2563eb; color: white; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+        .btn-submit:hover { background: #1d4ed8; }
+
         /* Grid de Cartas */
         .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 20px; }
         .card { background: white; border-radius: 12px; padding: 15px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); text-align: center; border: 1px solid #e2e8f0; transition: transform 0.15s ease; }
@@ -41,6 +48,22 @@
                 | <strong>Estado de Caché:</strong> <code>{{ cache_badge }}</code>
             {% endif %}
         </div>
+    </div>
+
+    <!-- Formulario para demostrar persistencia -->
+    <div class="form-container">
+        <h3 style="margin: 0; color: #334155;">Registrar nueva carta (Prueba de persistencia)</h3>
+        <form action="/agregar" method="POST">
+            <div class="form-row">
+                <input type="number" name="numero" placeholder="Nº (ej: 150)" required>
+                <input type="text" name="nombre" placeholder="Nombre (ej: Mewtwo)" required>
+                <input type="text" name="tipo" placeholder="Tipo (ej: Psíquico)" required>
+                <input type="number" name="hp" placeholder="HP (ej: 106)" required>
+                <input type="number" name="ataque" placeholder="Ataque (ej: 110)" required>
+                <input type="url" name="imagen_url" placeholder="URL imagen (opcional)">
+                <button type="submit" class="btn-submit">+ Guardar</button>
+            </div>
+        </form>
     </div>
 
     <div class="grid">
