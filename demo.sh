@@ -56,34 +56,34 @@ echo ""
 presionar_enter
 
 # -------------------------------------------------------------------
-# FASE 3: Benchmark de Velocidad Comparativo (DEV sin Caché vs PROD con Caché)
+# FASE 3: Benchmark de Velocidad Comparativo (20 Consultas: DEV vs PROD)
 # -------------------------------------------------------------------
 echo -e "${CYAN}[FASE 3] Benchmark de Rendimiento: PostgreSQL (DEV) vs Redis RAM (PROD)${NC}"
-echo -e "Explicación: Realizamos 10 consultas consecutivas a cada entorno para calcular la latencia media."
+echo -e "Explicación: Realizamos 20 consultas consecutivas a cada entorno para calcular la latencia media."
 
-echo -e "\n${YELLOW}Ejecutando 10 peticiones a DEV (http://localhost:5000)...${NC}"
+echo -e "\n${YELLOW}Ejecutando 20 peticiones a DEV (http://localhost:5000)...${NC}"
 SUM_DEV=0
-for i in {1..10}; do
+for i in {1..20}; do
     MS=$(curl -s -w "%{time_total}\n" -o /dev/null http://localhost:5000 | awk '{print $1 * 1000}')
     SUM_DEV=$(echo "$SUM_DEV + $MS" | bc)
     echo -n "."
-    sleep 0.1
+    sleep 0.05
 done
-AVG_DEV=$(echo "scale=2; $SUM_DEV / 10" | bc)
+AVG_DEV=$(echo "scale=2; $SUM_DEV / 20" | bc)
 echo -e "\n${GREEN}⚡ Tiempo medio de respuesta en DEV (PostgreSQL Directo): ${AVG_DEV} ms${NC}"
 
 # Primera petición a PROD para asegurar que la caché está precargada (HIT)
 curl -s -o /dev/null http://localhost:5001
 
-echo -e "\n${YELLOW}Ejecutando 10 peticiones a PROD (http://localhost:5001)...${NC}"
+echo -e "\n${YELLOW}Ejecutando 20 peticiones a PROD (http://localhost:5001)...${NC}"
 SUM_PROD=0
-for i in {1..10}; do
+for i in {1..20}; do
     MS=$(curl -s -w "%{time_total}\n" -o /dev/null http://localhost:5001 | awk '{print $1 * 1000}')
     SUM_PROD=$(echo "$SUM_PROD + $MS" | bc)
     echo -n "."
-    sleep 0.1
+    sleep 0.05
 done
-AVG_PROD=$(echo "scale=2; $SUM_PROD / 10" | bc)
+AVG_PROD=$(echo "scale=2; $SUM_PROD / 20" | bc)
 echo -e "\n${GREEN}⚡ Tiempo medio de respuesta en PROD (Caché Redis): ${AVG_PROD} ms${NC}"
 
 echo -e "\n${BLUE}💡 CONCLUSIÓN:${NC} La lectura desde la memoria RAM de Redis reduce drásticamente el tiempo de respuesta frente a las consultas en disco de PostgreSQL."
