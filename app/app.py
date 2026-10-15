@@ -8,6 +8,9 @@ import redis
 
 app = Flask(__name__)
 
+# Tiempo de inicio de la aplicación para calcular el uptime
+UPTIME_START = time.time()
+
 DB_HOST = os.getenv("DB_HOST", "db")
 DB_NAME = os.getenv("DB_NAME", "practica_db")
 DB_USER = os.getenv("DB_USER", "postgres")
@@ -69,13 +72,29 @@ def fetch_pokemon_from_db():
     return [dict(r) for r in rows]
 
 
-def calculate_stats(pokemon_list):
-    if not pokemon_list:
-        return {"total": 0, "avg_hp": 0, "avg_atk": 0}
-    total = len(pokemon_list)
-    avg_hp = round(sum(p["hp"] for p in pokemon_list) / total, 1)
-    avg_atk = round(sum(p["ataque"] for p in pokemon_list) / total, 1)
-    return {"total": total, "avg_hp": avg_hp, "avg_atk": avg_atk}
+def get_container_metrics():
+    """Recopila estadísticas técnicas del propio contenedor Docker."""
+    pid = os.getpid()
+    hostname = os.uname().nodename  # En Docker corresponde al Container ID corto
+
+    # Lectura del consumo de memoria desde el pseudofichero del kernel Linux /proc
+    mem_mb = "N/A"
+    try:
+        with open("/proc/self/statm", "r") as f:
+            pages = int(f.read().split()[0])
+            mem_mb = f"{round((pages * 4096) / (1024 * 1024), 1)} MB"
+    except Exception:
+        pass
+
+    # Uptime en segundos
+    uptime_sec = int(time.time() - UPTIME_START)
+
+    return {
+        "container_id": hostname[:12],
+        "pid": pid,
+        "mem_usage": mem_mb,
+        "uptime": f"{uptime_sec}s",
+    }
 
 
 @app.route("/")
@@ -119,7 +138,7 @@ def index():
 
     fin = time.perf_counter()
     tiempo_ms = round((fin - inicio) * 1000, 2)
-    stats = calculate_stats(pokemon_list)
+    metrics = get_container_metrics()
 
     return render_template(
         "index.html",
@@ -130,7 +149,7 @@ def index():
         fuente_datos=fuente_datos,
         tiempo_ms=tiempo_ms,
         cache_badge=cache_badge,
-        stats=stats,
+        metrics=metrics,
     )
 
 
