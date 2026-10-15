@@ -8,7 +8,6 @@ import redis
 
 app = Flask(__name__)
 
-# Configuración por variables de entorno
 DB_HOST = os.getenv("DB_HOST", "db")
 DB_NAME = os.getenv("DB_NAME", "practica_db")
 DB_USER = os.getenv("DB_USER", "postgres")
@@ -19,22 +18,50 @@ REDIS_HOST = os.getenv("REDIS_HOST", None)
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 
 
-def get_db_connection():
-    return psycopg2.connect(
+def check_db_health():
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT,
+            connect_timeout=2,
+        )
+        conn.close()
+        return True, "ONLINE"
+    except Exception as e:
+        return False, f"OFFLINE ({str(e)})"
+
+
+def check_redis_health():
+    if not REDIS_HOST:
+        return False, "DESACTIVADO (DEV)"
+    try:
+        r = redis.Redis(
+            host=REDIS_HOST,
+            port=int(REDIS_PORT),
+            socket_timeout=2,
+            decode_responses=True,
+        )
+        r.ping()
+        return True, "ONLINE"
+    except Exception as e:
+        return False, f"OFFLINE ({str(e)})"
+
+
+def fetch_pokemon_from_db():
+    conn = psycopg2.connect(
         host=DB_HOST,
         database=DB_NAME,
         user=DB_USER,
         password=DB_PASSWORD,
         port=DB_PORT,
-        connect_timeout=3,
+        connect_timeout=2,
     )
-
-
-def fetch_pokemon_from_db():
-    conn = get_db_connection()
     cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
     cur.execute(
-        "SELECT id, numero, nombre, tipo, hp, ataque, imagen_url FROM pokemon ORDER BY id ASC;"
+        "SELECT id, numero, nombre, tipo, hp, ataque, imagen_url FROM pokemon ORDER BY numero ASC;"
     )
     rows = cur.fetchall()
     cur.close()
@@ -42,53 +69,57 @@ def fetch_pokemon_from_db():
     return [dict(r) for r in rows]
 
 
+def calculate_stats(pokemon_list):
+    if not pokemon_list:
+        return {"total": 0, "avg_hp": 0, "avg_atk": 0}
+    total = len(pokemon_list)
+    avg_hp = round(sum(p["hp"] for p in pokemon_list) / total, 1)
+    avg_atk = round(sum(p["ataque"] for p in pokemon_list) / total, 1)
+    return {"total": total, "avg_hp": avg_hp, "avg_atk": avg_atk}
+
+
 @app.route("/")
 def index():
     entorno = "Producción (PROD)" if REDIS_HOST else "Desarrollo (DEV)"
-    db_status = "ONLINE"
-    redis_status = "DESACTIVADO (DEV)"
+
+    db_ok, db_status = check_db_health()
+    redis_ok, redis_status = check_redis_health()
+
     pokemon_list = []
-    fuente_datos = "PostgreSQL"
-    cache_badge = "MISS"
+    fuente_datos = "Ninguna"
+    cache_badge = "N/A"
 
     inicio = time.perf_counter()
 
-    if REDIS_HOST:
+    if REDIS_HOST and redis_ok:
         try:
             r = redis.Redis(
                 host=REDIS_HOST,
                 port=int(REDIS_PORT),
-                socket_timeout=3,
+                socket_timeout=2,
                 decode_responses=True,
             )
-            r.ping()
-            redis_status = "ONLINE"
-
             datos_cache = r.get("cartas_pokemon")
             if datos_cache:
                 pokemon_list = json.loads(datos_cache)
                 fuente_datos = "Caché Redis (Memoria RAM ⚡)"
                 cache_badge = "HIT"
-            else:
+            elif db_ok:
                 pokemon_list = fetch_pokemon_from_db()
                 r.setex("cartas_pokemon", 30, json.dumps(pokemon_list))
                 fuente_datos = "PostgreSQL (Guardado en Redis por 30s)"
                 cache_badge = "MISS"
-        except Exception as e:
-            redis_status = f"OFFLINE ({str(e)})"
-            try:
+        except Exception:
+            if db_ok:
                 pokemon_list = fetch_pokemon_from_db()
-            except Exception as dbe:
-                db_status = f"OFFLINE ({str(dbe)})"
-    else:
-        try:
-            pokemon_list = fetch_pokemon_from_db()
-            fuente_datos = "PostgreSQL (Directo de BD)"
-        except Exception as e:
-            db_status = f"OFFLINE ({str(e)})"
+                fuente_datos = "PostgreSQL (Fallback por fallo de caché)"
+    elif db_ok:
+        pokemon_list = fetch_pokemon_from_db()
+        fuente_datos = "PostgreSQL (Directo de BD)"
 
     fin = time.perf_counter()
     tiempo_ms = round((fin - inicio) * 1000, 2)
+    stats = calculate_stats(pokemon_list)
 
     return render_template(
         "index.html",
@@ -99,12 +130,12 @@ def index():
         fuente_datos=fuente_datos,
         tiempo_ms=tiempo_ms,
         cache_badge=cache_badge,
+        stats=stats,
     )
 
 
 @app.route("/agregar", methods=["POST"])
 def agregar_pokemon():
-    """Inserta un nuevo Pokémon y limpia la caché para reflejar el cambio inmediato."""
     numero = request.form.get("numero", type=int)
     nombre = request.form.get("nombre", type=str)
     tipo = request.form.get("tipo", type=str)
@@ -112,31 +143,38 @@ def agregar_pokemon():
     ataque = request.form.get("ataque", type=int)
     imagen_url = request.form.get("imagen_url", type=str)
 
-    # Imagen por defecto si no se introduce ninguna
     if not imagen_url:
         imagen_url = f"https://raw.githubusercontent.com/PokeAPI/sprites/master/sprites/pokemon/other/official-artwork/{numero}.png"
 
-    # 1. Guardar en PostgreSQL
-    conn = get_db_connection()
-    cur = conn.cursor()
-    cur.execute(
-        """
-        INSERT INTO pokemon (numero, nombre, tipo, hp, ataque, imagen_url)
-        VALUES (%s, %s, %s, %s, %s, %s);
-    """,
-        (numero, nombre, tipo, hp, ataque, imagen_url),
-    )
-    conn.commit()
-    cur.close()
-    conn.close()
+    try:
+        conn = psycopg2.connect(
+            host=DB_HOST,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            port=DB_PORT,
+            connect_timeout=2,
+        )
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT INTO pokemon (numero, nombre, tipo, hp, ataque, imagen_url)
+            VALUES (%s, %s, %s, %s, %s, %s);
+        """,
+            (numero, nombre, tipo, hp, ataque, imagen_url),
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
 
-    # 2. Invalidación de caché en Redis (si estamos en producción)
-    if REDIS_HOST:
-        try:
-            r = redis.Redis(host=REDIS_HOST, port=int(REDIS_PORT))
-            r.delete("cartas_pokemon")
-        except Exception:
-            pass
+        if REDIS_HOST:
+            try:
+                r = redis.Redis(host=REDIS_HOST, port=int(REDIS_PORT))
+                r.delete("cartas_pokemon")
+            except Exception:
+                pass
+    except Exception:
+        pass
 
     return redirect(url_for("index"))
 
@@ -144,29 +182,14 @@ def agregar_pokemon():
 @app.route("/status")
 @app.route("/health")
 def status():
-    db_ok = False
-    try:
-        conn = get_db_connection()
-        conn.close()
-        db_ok = True
-    except Exception:
-        db_ok = False
-
-    redis_ok = False
-    if REDIS_HOST:
-        try:
-            r = redis.Redis(host=REDIS_HOST, port=int(REDIS_PORT), socket_timeout=3)
-            r.ping()
-            redis_ok = True
-        except Exception:
-            redis_ok = False
-
-    salud_general = db_ok and (redis_ok if REDIS_HOST else True)
+    db_ok, _ = check_db_health()
+    redis_ok, _ = check_redis_health()
+    sistema_sano = db_ok and (redis_ok if REDIS_HOST else True)
 
     return (
         jsonify(
             {
-                "status": "healthy" if salud_general else "unhealthy",
+                "status": "healthy" if sistema_sano else "degraded",
                 "database": "healthy" if db_ok else "unhealthy",
                 "cache": (
                     "healthy"
@@ -175,7 +198,7 @@ def status():
                 ),
             }
         ),
-        200 if salud_general else 500,
+        200 if sistema_sano else 503,
     )
 
 
