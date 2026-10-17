@@ -13,6 +13,7 @@ help:
 	@echo "  make down (o stop)    -> Detiene todos los contenedores"
 	@echo "  make clean            -> Detiene y BORRA todos los volúmenes (reset de BDs)"
 	@echo "  make ps               -> Lista todos los contenedores en ejecución"
+	@echo "  make demo             -> Lanza script que demuestra funcionalidades del sistema montado"
 
 # Construcción
 build:
