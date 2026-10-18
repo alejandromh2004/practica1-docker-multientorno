@@ -98,12 +98,9 @@ El proyecto cuenta con tareas automatizadas mediante `Makefile`:
   ```bash
   make prod
   ```
-* **Probar conexiones a la Base de Datos y Caché:**
+* **Scirpt automatizado con fases:**
   ```bash
-  make test-db-dev   # Comprueba pg_isready en DEV
-  make test-db-prod  # Comprueba pg_isready en PROD
-  make test-redis    # Comprueba ping en Redis (PROD)
-  make test          # Consulta los endpoints /status de ambos entornos
+  make demo          # Recrea varios casos donde se reflejan las funcionalidades
   ```
 * **Detener todos los contenedores:**
   ```bash
