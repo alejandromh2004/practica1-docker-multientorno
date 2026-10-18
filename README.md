@@ -76,6 +76,13 @@ El sistema demuestra la persistencia de datos mediante volúmenes, la orquestaci
 * Docker Compose (v2.x)
 * GNU Make
 
+### Configuración de Entornos (.env)
+Nota para la evaluación:
+
+Siguiendo las buenas prácticas de seguridad, los archivos de configuración real (.env.dev y .env.prod) están incluidos en .gitignore y no se versionan en GitHub. En el repositorio se proporciona la plantilla .env.example.
+
+Para facilitar la corrección inmediata, la entrega comprimida (.zip) subida al Campus Digital incluye los archivos .env.dev y .env.prod preconfigurados para ejecutar make all directamente. Si se clona desde Git, bastará con copiar .env.example a .env.dev y .env.prod.
+
 ### Comandos del Makefile
 El proyecto cuenta con tareas automatizadas mediante `Makefile`:
 
