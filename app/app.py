@@ -6,22 +6,33 @@ import psycopg2
 import psycopg2.extras
 import redis
 
+# Inicialización de la aplicación Flask
 app = Flask(__name__)
 
-# Tiempo de inicio de la aplicación para calcular el uptime
+# Marca de tiempo global para calcular el Uptime (tiempo activo) del contenedor
 UPTIME_START = time.time()
 
+# ==============================================================================
+# REQUISITO DE SEGURIDAD: Sin credenciales ni configuraciones "hardcodeadas"
+# Se leen todas las variables de entorno inyectadas desde .env.dev / .env.prod
+# ==============================================================================
 DB_HOST = os.getenv("DB_HOST", "db")
 DB_NAME = os.getenv("DB_NAME", "practica_db")
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "postgres")
 DB_PORT = os.getenv("DB_PORT", "5432")
 
+# REDIS_HOST solo estará presente en el entorno de Producción (.env.prod)
 REDIS_HOST = os.getenv("REDIS_HOST", None)
 REDIS_PORT = os.getenv("REDIS_PORT", "6379")
 
 
+# ==============================================================================
+# REQUISITO REQUERIDO: Comprobación dinámica del estado de los servicios
+# Evalúa la conexión con PostgreSQL en tiempo real sin bloquear la app
+# ==============================================================================
 def check_db_health():
+    """Verifica si la base de datos PostgreSQL responde a peticiones."""
     try:
         conn = psycopg2.connect(
             host=DB_HOST,
@@ -38,6 +49,7 @@ def check_db_health():
 
 
 def check_redis_health():
+    """Verifica la salud del servicio de caché Redis (solo activo en PROD)."""
     if not REDIS_HOST:
         return False, "DESACTIVADO (DEV)"
     try:
@@ -54,6 +66,7 @@ def check_redis_health():
 
 
 def fetch_pokemon_from_db():
+    """Consulta la lista de Pokémon directamente en PostgreSQL."""
     conn = psycopg2.connect(
         host=DB_HOST,
         database=DB_NAME,
@@ -73,11 +86,14 @@ def fetch_pokemon_from_db():
 
 
 def get_container_metrics():
-    """Recopila estadísticas técnicas del propio contenedor Docker."""
+    """
+    Métricas técnicas del propio contenedor Docker.
+    Permite visualizar el ID del contenedor (Hostname), consumo RAM y PID.
+    """
     pid = os.getpid()
-    hostname = os.uname().nodename  # En Docker corresponde al Container ID corto
+    hostname = os.uname().nodename  # Corresponde al ID corto del contenedor en Docker
 
-    # Lectura del consumo de memoria desde el pseudofichero del kernel Linux /proc
+    # Lectura del uso de memoria en RAM desde el sistema de archivos del kernel Linux /proc
     mem_mb = "N/A"
     try:
         with open("/proc/self/statm", "r") as f:
@@ -86,7 +102,6 @@ def get_container_metrics():
     except Exception:
         pass
 
-    # Uptime en segundos
     uptime_sec = int(time.time() - UPTIME_START)
 
     return {
@@ -97,10 +112,15 @@ def get_container_metrics():
     }
 
 
+# ==============================================================================
+# RUTA PRINCIPAL (UI WEB)
+# Muestra el estado del entorno, métricas y aplica la lógica de Caché (Redis)
+# ==============================================================================
 @app.route("/")
 def index():
     entorno = "Producción (PROD)" if REDIS_HOST else "Desarrollo (DEV)"
 
+    # Comprobación dinámica e independiente del estado de los servicios
     db_ok, db_status = check_db_health()
     redis_ok, redis_status = check_redis_health()
 
@@ -108,8 +128,10 @@ def index():
     fuente_datos = "Ninguna"
     cache_badge = "N/A"
 
+    # Cronómetro para medir la latencia total de la consulta
     inicio = time.perf_counter()
 
+    # REQUISITO CACHÉ: En PROD se intenta leer primero de Redis
     if REDIS_HOST and redis_ok:
         try:
             r = redis.Redis(
@@ -120,19 +142,23 @@ def index():
             )
             datos_cache = r.get("cartas_pokemon")
             if datos_cache:
+                # CACHE HIT: Datos servidos directamente desde la RAM de Redis (~1 ms)
                 pokemon_list = json.loads(datos_cache)
                 fuente_datos = "Caché Redis (Memoria RAM ⚡)"
                 cache_badge = "HIT"
             elif db_ok:
+                # CACHE MISS: Se lee de PostgreSQL y se guarda en Redis con TTL de 30s
                 pokemon_list = fetch_pokemon_from_db()
                 r.setex("cartas_pokemon", 30, json.dumps(pokemon_list))
                 fuente_datos = "PostgreSQL (Guardado en Redis por 30s)"
                 cache_badge = "MISS"
         except Exception:
+            # FALLBACK DE SEGURIDAD: Si falla Redis, la app sigue viva leyendo de PostgreSQL
             if db_ok:
                 pokemon_list = fetch_pokemon_from_db()
                 fuente_datos = "PostgreSQL (Fallback por fallo de caché)"
     elif db_ok:
+        # En DEV (o si Redis no está configurado), se consulta PostgreSQL directamente
         pokemon_list = fetch_pokemon_from_db()
         fuente_datos = "PostgreSQL (Directo de BD)"
 
@@ -153,6 +179,10 @@ def index():
     )
 
 
+# ==============================================================================
+# REQUISITO PERSISTENCIA Y ESCRITURA: Alta de nuevos registros
+# Invalida la caché de Redis al escribir para garantizar consistencia de datos
+# ==============================================================================
 @app.route("/agregar", methods=["POST"])
 def agregar_pokemon():
     numero = request.form.get("numero", type=int)
@@ -186,6 +216,8 @@ def agregar_pokemon():
         cur.close()
         conn.close()
 
+        # INVALIDACIÓN DE CACHÉ: Al insertar en la BD, borramos la clave en Redis
+        # para forzar que la siguiente lectura traiga los datos actualizados
         if REDIS_HOST:
             try:
                 r = redis.Redis(host=REDIS_HOST, port=int(REDIS_PORT))
@@ -198,11 +230,21 @@ def agregar_pokemon():
     return redirect(url_for("index"))
 
 
+# ==============================================================================
+# REQUISITO OBLIGATORIO: Endpoints técnicos /status y /health
+# Utilizados por los Healthchecks de Docker y para monitoreo externo
+# ==============================================================================
 @app.route("/status")
 @app.route("/health")
 def status():
+    """
+    Devuelve un JSON con el estado de salud de los servicios dependientes.
+    Si algún servicio crítico falla, responde con código HTTP 503 (Service Unavailable).
+    """
     db_ok, _ = check_db_health()
     redis_ok, _ = check_redis_health()
+
+    # En PROD ambos deben estar sanos; en DEV solo se requiere PostgreSQL
     sistema_sano = db_ok and (redis_ok if REDIS_HOST else True)
 
     return (
@@ -221,5 +263,6 @@ def status():
     )
 
 
+# Punto de entrada de la aplicación en el puerto 5000 dentro del contenedor
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
