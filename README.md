@@ -162,7 +162,6 @@ Si alguno de los servicios cae (por ejemplo, al detener el contenedor de la base
 1. **Aislamiento de Red:** Solo la aplicación web expone su puerto hacia el host (`5000` en DEV / `5001` en PROD). La base de datos PostgreSQL y la caché Redis no exponen puertos al exterior y son accesibles únicamente desde la red virtual privada de Docker.
 2. **Usuario sin privilegios de root:** El contenedor de Flask ejecuta la aplicación bajo un usuario dedicado sin privilegios (`USER appuser`) definido dentro del `Dockerfile`.
 3. **Gestión de variables de entorno:** Ninguna contraseña ni credencial está integrada (*hardcodeada*) dentro del código fuente Python o en los archivos `docker-compose.yml`. Todo se inyecta mediante archivos `.env`.
-   * *Nota académica:* Siguiendo las buenas prácticas, los archivos `.env` reales deben incluirse en `.gitignore`. Para facilitar la evaluación inmediata del profesor mediante `make all` sin exigir configuración manual previa, se incluyen `.env.dev` y `.env.prod` con credenciales ficticias de prueba en el repositorio.
 
 ---
 
